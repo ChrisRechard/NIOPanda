@@ -3,9 +3,14 @@ package Connect;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SocketChannel;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 
 
@@ -42,9 +47,10 @@ public class ConnectDanMuServer {
 	private int mErrno;
 	private String mErrMsg;
 
-	private Socket socket = null;
-	DataOutputStream os = null;
-	DataInputStream is = null;
+	//private Socket socket = null;
+	private SocketChannel socChannel;
+	private DataOutputStream os = null;
+	private DataInputStream is = null;
 	private volatile boolean mIsHeartBeatThreadStop = true;
 	private volatile boolean mIsReceivMsgThreadStop = true;
 
@@ -187,7 +193,7 @@ public class ConnectDanMuServer {
 		boolean isSuccess = false;
 		String result = "";
 		JSONObject json;
-		result = HttpRequest.sendGet(DANMUSERVERURL, "roomid=" + roomID);// 发送http请求，获取基本参数
+		result = HttpRequest.sendGet(DANMUSERVERURL, "roomid="+roomID);// 发送http请求，获取基本参数
 		if (result == null)
 			return false;
 		try {
@@ -199,29 +205,42 @@ public class ConnectDanMuServer {
 			return false;
 		// 发送连接弹幕服务器请求（通过socket）
 		try {
-			socket = new Socket(mIP, mPort);// 建立socket连接
-			os = new DataOutputStream(socket.getOutputStream());// 构建输入输出流对象
-			is = new DataInputStream(socket.getInputStream());
+			//socket = new Socket(mIP, mPort);// 建立socket连接
+			socChannel=SocketChannel.open();
+			socChannel.connect(new InetSocketAddress(mIP,mPort));
+			//os = new DataOutputStream(socket.getOutputStream());// 构建输入输出流对象
+			//is = new DataInputStream(socket.getInputStream());
+//			SocketChannel socketChannel = socket.getChannel();
+//			ByteBuffer buffer = ByteBuffer.wrap(GetConnectData());
+//			if(buffer==null)
+//				return false;
+//			socketChannel.write(buffer);
+//			buffer.clear();
 			os.write(GetConnectData());// 发送
+			//os.flush();
 			// 接收响应数据
-
-			byte readData[] = new byte[6];
-			int rpLength = is.read(readData);
-			if (rpLength >= 6) {
-				if (!(readData[0] == RESPONSE[0] && readData[1] == RESPONSE[1] && readData[2] == RESPONSE[2]
-						&& readData[3] == RESPONSE[3]))
-					isSuccess = false;
-				else {
-					isSuccess = true;
-					// 消息主体，暂时用不到
+			if (socChannel != null && os != null && is != null && socChannel.isConnected()){
+				byte readData[] = new byte[6];
+				int rpLength = is.read(readData);
+				if (rpLength >= 6) {
+					if (!(readData[0] == RESPONSE[0] && readData[1] == RESPONSE[1] && readData[2] == RESPONSE[2]
+							&& readData[3] == RESPONSE[3]))
+						isSuccess = false;
+					else {
+						isSuccess = true;
+						// 消息主体，暂时用不到
 					/*
 					 * short dataLength=(short) (readData[5]|(readData[4]<<8));
 					 * byte[] data=new byte[dataLength];//数据
 					 * is.read(data);//主体数据，appid+r的值，eg:id:845694055\nr:0 暂时用不到
 					 */
-				}
-			} else
-				isSuccess = false;
+					}
+				} else
+					isSuccess = false;
+			}else{
+				isSuccess=false;
+			}
+
 		} catch (NumberFormatException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -238,13 +257,13 @@ public class ConnectDanMuServer {
 			Thread heartBeatThread = new Thread(heartBeat);// 为心跳保持创建新的线程
 			mIsHeartBeatThreadStop = false;
 			//设置成当主线程停止时子线程停止
-			heartBeatThread.setDaemon(true);
+			//heartBeatThread.setDaemon(true);
 			heartBeatThread.start();// 开始线程
 			// 接收弹幕消息
 			ReceiveMessage ReceiveMsg = new ReceiveMessage();
 			Thread receiveMsgThread = new Thread(ReceiveMsg);
 			mIsReceivMsgThreadStop = false;
-			receiveMsgThread.setDaemon(true);
+			//receiveMsgThread.setDaemon(true);
 			receiveMsgThread.start();
 			return true;
 		}
@@ -260,7 +279,10 @@ public class ConnectDanMuServer {
 		public void run() {
 			while (!mIsHeartBeatThreadStop) {
 				try {
-					os.write(KEEPALIVE);
+					//os.write(KEEPALIVE);
+					ByteBuffer buffer = ByteBuffer.wrap(KEEPALIVE);
+					socChannel.write(buffer);
+					buffer.clear();
 					if (mIsSendHeartbeatPack) {// 没有接收到响应，已经与服务器断开了
 						// 连接断开,自动重新连接
 						ConnectToDanMuServer(mRoomID);
@@ -311,7 +333,6 @@ public class ConnectDanMuServer {
 			short msgLength;
 			byte[] ignoreBytes = new byte[IGNOREBYTELENGTH];
 			int mssageLength = 0;
-
 			while (!mIsReceivMsgThreadStop) {
 				try {
 					if (is.read(receivMsgFlag) >= 4) {// 接收到消息
@@ -340,16 +361,7 @@ public class ConnectDanMuServer {
 							// 连接正常
 							mIsSendHeartbeatPack = false; // 收到服务器对心跳包的响应，标志复位
 						} else {
-							// System.out.println(
-							// Integer.toHexString(receivMsgFlag[0]) + " " +
-							// Integer.toHexString(receivMsgFlag[1])
-							// + " " + Integer.toHexString(receivMsgFlag[2]) + "
-							// "
-							// + Integer.toHexString(receivMsgFlag[3]) + " ");
-							// System.out.println((char) receivMsgFlag[0] + " "
-							// + (char) receivMsgFlag[1] + " "
-							// + (char) receivMsgFlag[2] + " " + (char)
-							// receivMsgFlag[3] + " ");
+
 						}
 					}
 
@@ -360,15 +372,11 @@ public class ConnectDanMuServer {
 				}
 			}
 			System.out.println("ReceiveMessage Close");
-			if (mIsReceivMsgThreadStop) {
-
-			}
 		}
 	}
 
 	Message messageHelper = new Message();
 	Object messageReceied;
-
 	/*
 	 * 解读消息体，注意！！在弹幕多的情况下，一条msg中可能有多条弹幕信息
 	 */
@@ -376,63 +384,49 @@ public class ConnectDanMuServer {
 		// 将这个json格式的字符串进行处理，获得相应类型的对象
 		int indexOfStrEnd;
 		indexOfStrEnd = messageStr.indexOf("{");
-		if (!messageStr.substring(indexOfStrEnd + 1, indexOfStrEnd + 2).equals("\"")) {// 开头有问题
-			int index = messageStr.indexOf("{", indexOfStrEnd + 1);
-			if (index != -1)
-				messageStr = messageStr.substring(messageStr.indexOf("{", indexOfStrEnd + 1));// 获取可用的子串
+		if(!messageStr.substring(indexOfStrEnd+1, indexOfStrEnd+2).equals("\"")){//开头有问题
+			int index=messageStr.indexOf("{",indexOfStrEnd+1);
+			if(index!=-1)
+				messageStr = messageStr.substring(messageStr.indexOf("{", indexOfStrEnd+1));//获取可用的子串
 		}
-		indexOfStrEnd = messageStr.indexOf("}}}");
-		if (indexOfStrEnd != -1) {// 特殊消息（内容较多的消息）
-			if (indexOfStrEnd + 2 < messageStr.length()) {// 存在两条消息
-				int index = messageStr.indexOf("{", indexOfStrEnd);
-				if (index != -1)
-					MessageDecode(messageStr.substring(index));// 生成一个子串作为新的一条json
+		indexOfStrEnd=messageStr.indexOf("}}}");
+		if(indexOfStrEnd!=-1){//特殊消息（内容较多的消息）
+			if(indexOfStrEnd+2<messageStr.length()){//存在两条消息
+				int index=messageStr.indexOf("{",indexOfStrEnd);
+				if(index!=-1)
+					MessageDecode(messageStr.substring(index));//生成一个子串作为新的一条json
 			}
-		} else {
-			indexOfStrEnd = messageStr.indexOf("}}");
-			if (indexOfStrEnd == -1)// 没有符合条件的json字串
+		}
+		else{
+			indexOfStrEnd=messageStr.indexOf("}}");
+			if(indexOfStrEnd==-1)//没有符合条件的json字串
 				return;
-			if (indexOfStrEnd + 2 < messageStr.length()) {// 存在两条消息
-				MessageDecode(messageStr.substring(messageStr.indexOf("{", indexOfStrEnd)));// 生成一个子串作为新的一条json
+			if(indexOfStrEnd+2<messageStr.length()){//存在两条消息
+				MessageDecode(messageStr.substring(messageStr.indexOf("{",indexOfStrEnd)));//生成一个子串作为新的一条json
 			}
 		}
 		messageReceied = messageHelper.MessageDecode(messageStr);
-		if (messageReceied == null)
+		if(messageReceied==null)
 			return;
-		// mUIFrame.UpdateDanMu(messageReceied);
-		handle(messageReceied);
+		else {
+			handle(messageReceied);
+		}
 	}
 
 	public void handle(Object message) {
 		if (message.getClass().equals(Danmu.class)) {// 弹幕
+			Connection conn = null;
 			Danmu danmu = (Danmu) message;
-
-			// System.out.println(danmu.mTime);
-			//Unix时间戳转字符
-			//Date dat = new Date(danmu.mTime * 1000);
-			//GregorianCalendar gc = new GregorianCalendar();
-			//gc.setTime(dat);
-			//java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
-			//String time = format.format(gc.getTime());
-
-			// System.out.println("danmu:" + time);
-			// if (danmu.mPlatform.equals(Platform.PLATFORM_Android) ||
-			// danmu.mPlatform.equals(Platform.PLATFORM_Ios)) {
-			// danMuMessage.setPhone(true);
-			// danMuMessage.setPhoneIcon(new
-			// ImageIcon(PandaTVDanmu.class.getResource("/pic/mobile.png")));
-			// }
-			// String userName = danmu.mNickName;
 			String driver = "com.mysql.jdbc.Driver";
-			String url = "jdbc:mysql://127.0.0.1:3306/panda?useSSL=true";
-			String user = "root";
-			String password = "qwerty";
+        	String url = "jdbc:mysql://5716e40e38f53.gz.cdb.myqcloud.com:10823/panda?useSSL=true";
+			String user = "cdb_outerroot";
+        	String password = "fmm529529529";
 
 			try {
 				Class.forName(driver);
-				Connection conn = (Connection) DriverManager.getConnection(url, user, password);
-				if (!conn.isClosed())
-					System.out.println("Succeeded connecting to the Database!");
+				conn = (Connection) DriverManager.getConnection(url, user, password);
+//				if (!conn.isClosed())
+//					System.out.println("Succeeded connecting to the Database!");
 				String sql = "insert into danmuinfo (roomid, recTime) values(?,?)";
 				PreparedStatement preparedStatement = (PreparedStatement) conn.prepareStatement(sql);
 				preparedStatement.setInt(1, Integer.parseInt(danmu.mRoomID));
@@ -443,55 +437,33 @@ public class ConnectDanMuServer {
 					System.out.println("Insert Danmu Success");
 				}
 				// conn.commit();
-				preparedStatement.close();
-				conn.close();
+//				preparedStatement.close();
+//				conn.close();
 			} catch (Exception e) {
 				// TODO: handle exception
 				System.out.println("Sorry,can`t find the Driver!");
 				e.printStackTrace();
+			}finally {
+				try {
+					if (conn != null) {
+						conn.close();
+					}
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
 			}
 			return;
-			// if (Integer.parseInt(danmu.mIdentity) >= 60) {
-			// if (danmu.mIdentity.equals(User.ROLE_MANAGER)) {// 管理员
-			// danMuMessage.setSymbolAfterUserName("(管理) ");
-			// } else if (danmu.mIdentity.equals(User.ROLE_HOSTER)) {// 主播
-			// danMuMessage.setSymbolAfterUserName("(主播) ");
-			// } else if (danmu.mIdentity.equals(User.ROLE_SUPER_MANAGER)) {//
-			// 超管
-			// danMuMessage.setSymbolAfterUserName("(超管) ");
-			// }
-			// } else
-			// danMuMessage.setSymbolAfterUserName(" ");
-			// danMuMessage.setUserName(userName);
-			// danMuMessage.setMessage(danmu.mContent);
-			// if (mIsEnableVoice) {
-			// if (!mIsVoicing) {
-			// mIsVoicing = true;
-			// // 3.开始合成
-			// mTts.startSpeaking(danmu.mContent, mSynListener);
-			// } else {
-			// mVoiceContent.add(danmu.mContent);
-			// }
-			// }
 		} else if (message.getClass().equals(Bamboo.class)) {// 竹子
+			Connection conn = null;
 			Bamboo bamboo = (Bamboo) message;
-			//Unix时间戳转字符串
-//			Date dat = new Date(bamboo.mTime * 1000);
-//			GregorianCalendar gc = new GregorianCalendar();
-//			gc.setTime(dat);
-//			java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
-//			String time = format.format(gc.getTime());
-
 			String driver = "com.mysql.jdbc.Driver";
-			String url = "jdbc:mysql://127.0.0.1:3306/panda?useSSL=true";
-			String user = "root";
-			String password = "qwerty";
+			String url = "jdbc:mysql://5716e40e38f53.gz.cdb.myqcloud.com:10823/panda?useSSL=true";
+			String user = "cdb_outerroot";
+			String password = "fmm529529529";
 
 			try {
 				Class.forName(driver);
-				Connection conn = (Connection) DriverManager.getConnection(url, user, password);
-				if (!conn.isClosed())
-					System.out.println("Succeeded connecting to the Database!");
+				conn = (Connection) DriverManager.getConnection(url, user, password);
 				String sql = "insert into zhuziinfo (roomid, recTime, zhuzi) values(?,?,?)";
 				PreparedStatement preparedStatement = (PreparedStatement) conn.prepareStatement(sql);
 				preparedStatement.setInt(1, Integer.parseInt(bamboo.mRoomID));
@@ -502,36 +474,65 @@ public class ConnectDanMuServer {
 					System.out.println("Insert Bamboo Success");
 				}
 				// conn.commit();
-				preparedStatement.close();
-				conn.close();
-			} catch (Exception e) {
+				//conn.close();
+			}catch (Exception e) {
 				// TODO: handle exception
 				System.out.println("Sorry,can`t find the Driver!");
 				e.printStackTrace();
+			}finally {
+				try {
+					conn.close();
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
 			}
 			return;
-			// danMuMessage.setPhone(false);
-			// danMuMessage.setGift(true);
-			// danMuMessage.setUserName(bamboo.mNickName);
-			// danMuMessage.setSymbolAfterUserName("");
-			// danMuMessage.setMessage("送给主播");
-			// danMuMessage.setGiftNumber(bamboo.mContent);
-			// danMuMessage.setGiftUnit("个");
-			// danMuMessage.setGiftName("竹子");
-			// if (mIsEnableVoice) {
-			// if (!mIsVoicing) {
-			// mIsVoicing = true;
-			// // 3.开始合成
-			// mTts.startSpeaking("感谢 ！ " + bamboo.mNickName + "送的" +
-			// bamboo.mContent + "个竹子", mSynListener);
-			// } else {
-			// mVoiceContent.add("感谢 ！" + bamboo.mNickName + "送的" +
-			// bamboo.mContent + "个竹子");
-			// }
-			// }
-		} else if (messageReceied.getClass().equals(Visitors.class)) {// 访客数量
-//			Visitors visitor = (Visitors) messageReceied;
+		}else if (message.getClass().equals(Gift.class)) {// 礼物
+			Connection conn = null;
+			Gift gift = (Gift) message;
+			String driver = "com.mysql.jdbc.Driver";
+			String url = "jdbc:mysql://5716e40e38f53.gz.cdb.myqcloud.com:10823/panda?useSSL=true";
+			String user = "cdb_outerroot";
+			String password = "fmm529529529";
+			try {
+				Class.forName(driver);
+				conn = (Connection) DriverManager.getConnection(url, user, password);
+//				if (!conn.isClosed())
+//					System.out.println("Succeeded connecting to the Database!");
+				String sql = "insert into presentinfo (roomid, recTime, presentvalue) values(?,?,?)";
+				PreparedStatement preparedStatement = (PreparedStatement) conn.prepareStatement(sql);
+				preparedStatement.setInt(1, Integer.parseInt(gift.mRoomID));
+				preparedStatement.setTimestamp(2, new Timestamp(gift.mTime*1000));
+				preparedStatement.setInt(3, Integer.parseInt(gift.mContentPrice));
+				//preparedStatement.setInt(4, 1);
+				int re = preparedStatement.executeUpdate();
+				if (re > 0) {
+					System.out.println("Insert Gift Success");
+				}
+				// conn.commit();
+				//preparedStatement.close();
 
+			}catch (Exception e) {
+				// TODO: handle exception
+				System.out.println("Sorry,can`t find the Driver!");
+				e.printStackTrace();
+			}finally {
+				try {
+					if (conn != null) {
+						conn.close();
+					}
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+			}
+			return;
+
+		}
+
+	}
+//	else if (messageReceied.getClass().equals(Visitors.class)) {// 访客数量
+//			Visitors visitor = (Visitors) messageReceied;
+//
 //			String driver = "com.mysql.jdbc.Driver";
 //			String url = "jdbc:mysql://127.0.0.1:3306/panda?useSSL=true";
 //			String user = "root";
@@ -558,81 +559,17 @@ public class ConnectDanMuServer {
 //				System.out.println("Sorry,can`t find the Driver!");
 //				e.printStackTrace();
 //			}
-			// mVisitorNum.setText(visitor.mContent);
-			return;
-		} else if (message.getClass().equals(Gift.class)) {// 礼物
-			Gift gift = (Gift) message;
-			// danMuMessage.setPhone(false);
-			// danMuMessage.setGift(true);
-			// danMuMessage.setUserName(gift.mNickName);
-			// danMuMessage.setSymbolAfterUserName("");
-			// danMuMessage.setMessage("送给主播");
-			// danMuMessage.setGiftNumber(gift.mContentCombo);
-			// danMuMessage.setGiftUnit("个");
-			// danMuMessage.setGiftName(gift.mContentName);
-			// if (mIsEnableVoice) {
-			// if (!mIsVoicing) {
-			// mIsVoicing = true;
-			// // 3.开始合成
-			// mTts.startSpeaking("感谢 ！ " + gift.mNickName + "送的" +
-			// gift.mContentCombo + "个" + gift.mContentName,
-			// mSynListener);
-			// } else {
-			// mVoiceContent.add("感谢 ！" + gift.mNickName + "送的" +
-			// gift.mContentCombo + "个" + gift.mContentName);
-			// }
-			// }
-
-//			Date dat = new Date(gift.mTime * 1000);
-//			GregorianCalendar gc = new GregorianCalendar();
-//			gc.setTime(dat);
-//			java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
-//			String time = format.format(gc.getTime());
-
-			String driver = "com.mysql.jdbc.Driver";
-			String url = "jdbc:mysql://127.0.0.1:3306/panda?useSSL=true";
-			String user = "root";
-			String password = "qwerty";
-
-			try {
-				Class.forName(driver);
-				Connection conn = (Connection) DriverManager.getConnection(url, user, password);
-				if (!conn.isClosed())
-					System.out.println("Succeeded connecting to the Database!");
-				String sql = "insert into presentinfo (roomid, recTime, presentvalue) values(?,?,?)";
-				PreparedStatement preparedStatement = (PreparedStatement) conn.prepareStatement(sql);
-				preparedStatement.setInt(1, Integer.parseInt(gift.mRoomID));
-				preparedStatement.setTimestamp(2, new Timestamp(gift.mTime*1000));
-				//System.out.println(gift.mContentName);
-				//String temp = gift.mContentName;
-				preparedStatement.setInt(3, Integer.parseInt(gift.mContentPrice));
-				//preparedStatement.setInt(4, 1);
-				int re = preparedStatement.executeUpdate();
-				if (re > 0) {
-					System.out.println("Insert Gift Success");
-				}
-				// conn.commit();
-				preparedStatement.close();
-				conn.close();
-			} catch (Exception e) {
-				// TODO: handle exception
-				System.out.println("Sorry,can`t find the Driver!");
-				e.printStackTrace();
-			}
-			return;
-
-		}
-
-	}
-
+//		 mVisitorNum.setText(visitor.mContent);
+//		return;
+//	}
 	public void Close() {
-		if (socket != null && os != null && is != null && socket.isConnected()) {
+		if (socChannel != null && os != null && is != null && socChannel.isConnected()) {
 			try {
 				mIsHeartBeatThreadStop = true;// 停止心跳线程
 				mIsReceivMsgThreadStop = true;// 停止弹幕消息接收
 				os.close();
 				is.close();
-				socket.close();
+				socChannel.close();
 			} catch (IOException e) {
 				// e.printStackTrace();
 				System.out.println(e);

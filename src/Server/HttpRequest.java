@@ -47,10 +47,20 @@ public class HttpRequest {
 			} catch (IOException e) {
 				return null;
 			}
-			String line;
-			while ((line = in.readLine()) != null) {
-				result += line;
+			int BUFFER_SIZE=1024;
+			char[] buffer = new char[BUFFER_SIZE]; // or some other size,
+			int charsRead = 0;
+			StringBuffer sb = new StringBuffer();
+			while ( (charsRead  = in.read(buffer, 0, BUFFER_SIZE)) != -1) {
+				sb.append(buffer, 0, charsRead);
 			}
+			result=sb.toString();
+			//下面这段代码容易报java.io.IOException: Premature EOF的异常
+			//解决方法http://stackoverflow.com/questions/13210108/reading-a-web-page-in-java-ioexception-premature-eof
+			//String line;
+			//while ((line = in.readLine()) != null) {
+			//	result += line;
+			//}
 		} catch (Exception e) {
 			System.out.println("发送GET请求出现异常！" + e);
 			e.printStackTrace();

@@ -11,7 +11,8 @@ public class Message {
 		try {
 			json = new JSONObject(message);
 		} catch (JSONException e) {
-			System.out.println("信息不完整\n" + message);
+			//System.out.println("信息不完整\n" + message);
+			System.out.println("Incomplete information Incomplete information Incomplete information");
 		}
 		return JsonDecode(json);
 	}
